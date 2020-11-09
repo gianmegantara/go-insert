@@ -1,0 +1,118 @@
+package main
+
+import (
+	"database/sql"
+	"encoding/csv"
+	"fmt"
+	"log"
+	"os"
+	"strings"
+	"time"
+
+	"github.com/lib/pq"
+	_ "github.com/lib/pq"
+)
+
+// const dbConnString = "host=6cb1ff18-6565-462f-bc1a-3f2ed80f80b4.bn2a0fgd0tu045vmv2i0.databases.appdomain.cloud port=30722 dbname=test user=ibm_cloud_ba2ba57e_99bc_4828_8fbf_e58375dc04bc password=9ca377f3f91996a5c76a9159a44b4dcd95c8f87a35a022c097dbb1b1f1f3a6ae sslmode=verify-full sslrootcert=cert/cert.pem"
+
+const dbConnString = "user=megantara host=localhost dbname=test sslmode=disable password=tahugejrot500"
+
+func main() {
+	start := time.Now()
+
+	listFile, err := readCurrentDir()
+	if err != nil {
+		log.Println(err)
+	}
+
+	log.Println("files will be insert", listFile)
+	connStr := dbConnString
+	log.Println("connecting to db ...")
+
+	db, err := sql.Open("postgres", connStr)
+	if err != nil {
+		log.Fatal(err)
+	}
+	log.Println("connected")
+
+	for _, value := range listFile {
+		log.Println("inserting " + value + " to database, please wait ...")
+
+		records := ReadCSV("csv/" + value)
+		// columnStringify := strings.Join(columns, ",")
+
+		txn, err := db.Begin()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		dbname := strings.Split(value, ".")
+		stmt, err := txn.Prepare(pq.CopyIn(dbname[0], records[0]...))
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		for i := 1; i < len(records); i++ {
+			var value []interface{}
+			for _, v := range records[i] {
+				value = append(value, v)
+			}
+			_, err = stmt.Exec(value...)
+			if err != nil {
+				log.Fatal(err)
+			}
+		}
+
+		_, err = stmt.Exec()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = stmt.Close()
+		if err != nil {
+			log.Fatal(err)
+		}
+
+		err = txn.Commit()
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Println(value + " sucessfully inserted")
+
+	}
+
+	duration := time.Since(start)
+	fmt.Println("done in", int64(duration.Milliseconds()), "ms")
+}
+
+func ReadCSV(filePath string) [][]string {
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		log.Fatal("Unable to read input file "+filePath, err)
+	}
+	defer f.Close()
+
+	csvReader := csv.NewReader(f)
+	records, err := csvReader.ReadAll()
+	if err != nil {
+		log.Fatal("Unable to parse file as CSV for "+filePath, err)
+	}
+
+	return records
+}
+
+func readCurrentDir() ([]string, error) {
+
+	file, err := os.Open("./csv")
+	if err != nil {
+		log.Fatalf("failed opening directory: %s", err)
+	}
+	defer file.Close()
+
+	list, err := file.Readdirnames(0) // 0 to read all files and folders
+	if err != nil {
+		log.Println(err)
+	}
+	return list, err
+}
